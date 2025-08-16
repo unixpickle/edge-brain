@@ -18,6 +18,7 @@ public struct Program {
   public init() {
   }
 
+  @discardableResult
   public mutating func addNode(kind: Node.Kind) -> Int {
     let newID = idCounter
     idCounter += 1
@@ -66,8 +67,8 @@ public struct Program {
   /// it from within the reachable set.
   ///
   /// Also returns the entire reachable set.
-  public func run(withInputs: Set<Int>) -> (outputs: [Int: Int], reachable: Set<Int>) {
-    var active = withInputs
+  public func run<C: Collection<Int>>(withInputs: C) -> (outputs: [Int: Int], reachable: Set<Int>) {
+    var active = Set(withInputs)
     var g = DiGraph(vertices: nodes.keys)
     for r in active {
       for edge in nodes[r]!.edges {
