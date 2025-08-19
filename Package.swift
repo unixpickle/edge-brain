@@ -9,7 +9,10 @@ let package = Package(
   products: [
     .library(name: "EdgeBrain", targets: ["EdgeBrain"])
   ],
-  dependencies: [],
+  dependencies: [
+    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+    .package(url: "https://github.com/unixpickle/honeycrisp-examples.git", from: "0.0.4"),
+  ],
   targets: [
     .target(
       name: "EdgeBrain",
@@ -22,6 +25,14 @@ let package = Package(
       ],
       swiftSettings: [
         .enableExperimentalFeature("Testing")
+      ]
+    ),
+    .executableTarget(
+      name: "ClassifyMNIST",
+      dependencies: [
+        "EdgeBrain",
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        .product(name: "MNIST", package: "honeycrisp-examples"),
       ]
     ),
   ]

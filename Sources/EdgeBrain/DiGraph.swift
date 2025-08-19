@@ -8,6 +8,9 @@ public struct Edge<V: Hashable>: Hashable {
   }
 }
 
+extension Edge: Codable where V: Codable {
+}
+
 /// A directed graph with constant-time insertion of edges and vertices.
 public struct DiGraph<V: Hashable> {
 
@@ -108,4 +111,7 @@ public struct DiGraph<V: Hashable> {
     return seen
   }
 
+}
+
+extension DiGraph: Codable where V: Codable {
 }

@@ -2,7 +2,11 @@ extension Program {
 
   /// Randomly apply mutations to approximately cover a given fraction of
   /// reachable hidden nodes.
-  public func randomlyInitialized(data: [Set<Int>], reachableFrac: Double) -> Program {
+  ///
+  /// Also returns the number of applied edge insertions.
+  public func randomlyInitialized<C: Collection<Int>>(data: [C], reachableFrac: Double) -> (
+    Program, Int
+  ) {
     var allMutations: [Mutation] = []
 
     // Fill up end until it has too much coverage
@@ -29,7 +33,7 @@ extension Program {
       for mutation in allMutations[startIdx..<midIdx] {
         mid.mutate(mutation)
       }
-      if end.reachableHiddenFraction(data: data) < reachableFrac {
+      if mid.reachableHiddenFraction(data: data) < reachableFrac {
         startIdx = midIdx
         start = mid
       } else {
@@ -37,12 +41,12 @@ extension Program {
       }
     }
 
-    return start
+    return (start, startIdx)
   }
 
   /// Compute the fraction of hidden nodes reachable on average over the
   /// dataset.
-  public func reachableHiddenFraction(data: [Set<Int>]) -> Double {
+  public func reachableHiddenFraction<C: Collection<Int>>(data: [C]) -> Double {
     var total = 0.0
     for x in data {
       let hCount = run(withInputs: x).reachable.count { nodes[$0]!.kind == .hidden }
@@ -52,4 +56,15 @@ extension Program {
     return total / (Double(data.count) * Double(hiddenCount))
   }
 
+}
+
+extension Classifier {
+  /// Apply the program's randomlyInitialized() method and return the number of
+  /// mutations applied.
+  public mutating func randomlyInitialize(data: [[Bool]], reachableFrac: Double) -> Int {
+    let (newProgram, mutationCount) = program.randomlyInitialized(
+      data: data.map(inputNodes), reachableFrac: reachableFrac)
+    program = newProgram
+    return mutationCount
+  }
 }

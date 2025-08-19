@@ -1,5 +1,5 @@
-public struct Node {
-  public enum Kind {
+public struct Node: Codable {
+  public enum Kind: Codable {
     case input
     case hidden
     case output
@@ -10,7 +10,7 @@ public struct Node {
   public var edges: Set<Edge<Int>> = []
 }
 
-public struct Program {
+public struct Program: Codable {
 
   public var nodes: [Int: Node] = [:]
   private var idCounter: Int = 0
