@@ -1,2 +1,6 @@
 .build/
 .DS_Store
+*.plist
+mnist_data/
+.vscode
+Package.resolved
