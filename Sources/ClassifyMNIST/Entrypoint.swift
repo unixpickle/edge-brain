@@ -55,7 +55,7 @@ import MNIST
 
       while true {
         let (batchInputs, batchTargets) = select(count: batchSize, fromImages: dataset.train)
-        let mutatedPrograms = (0..<mutationCount).map { _ in
+        var mutatedPrograms = (0..<mutationCount).map { _ in
           var newModel = model
           for _ in 0..<mutationSize {
             newModel.program.mutate(
@@ -63,6 +63,10 @@ import MNIST
           }
           return newModel
         }
+
+        let greedyModel = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
+        mutatedPrograms.append(greedyModel)
+
         let losses = mutatedPrograms.map {
           evaluateLoss(model: $0, inputs: batchInputs, targets: batchTargets)
         }
@@ -73,7 +77,9 @@ import MNIST
           model = mutatedPrograms[minIdx]
         }
         step += 1
-        print("step \(step): loss=\(oldLoss) min=\(minLoss) max=\(losses.max()!)")
+        print(
+          "step \(step): loss=\(oldLoss) greedy=\(losses.last!) min=\(minLoss) max=\(losses.max()!)"
+        )
         if step % saveInterval == 0 {
           let state = State(
             model: model,
