@@ -1,5 +1,5 @@
-public struct Node: Codable {
-  public enum Kind: Codable {
+public struct Node: Codable, Sendable {
+  public enum Kind: Codable, Sendable {
     case input
     case hidden
     case output
@@ -10,7 +10,9 @@ public struct Node: Codable {
   public var edges: Set<Edge<Int>> = []
 }
 
-public struct Program: Codable {
+public struct Program: Codable, Sendable {
+
+  public typealias Output = (outputs: [Int: Int], reachable: Set<Int>)
 
   public var nodes: [Int: Node] = [:]
   private var idCounter: Int = 0
@@ -67,7 +69,7 @@ public struct Program: Codable {
   /// it from within the reachable set.
   ///
   /// Also returns the entire reachable set.
-  public func run<C: Collection<Int>>(withInputs: C) -> (outputs: [Int: Int], reachable: Set<Int>) {
+  public func run<C: Collection<Int>>(withInputs: C) -> Output {
     var active = Set(withInputs)
     var g = DiGraph(vertices: nodes.keys)
     for r in active {

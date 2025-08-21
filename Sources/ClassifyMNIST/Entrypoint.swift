@@ -61,11 +61,16 @@ import MNIST
             newModel.program.mutate(
               newModel.program.randomMutation(deleteProb: mutationDeleteProb))
           }
+          newModel =
+            newModel.greedilyMutatedForData(
+              data: batchInputs,
+              labels: batchTargets
+            ).classifier
           return newModel
         }
 
-        let greedyModel = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
-        mutatedPrograms.append(greedyModel)
+        let greedyMutated = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
+        mutatedPrograms.append(greedyMutated.classifier)
 
         let losses = mutatedPrograms.map {
           evaluateLoss(model: $0, inputs: batchInputs, targets: batchTargets)
@@ -78,7 +83,8 @@ import MNIST
         }
         step += 1
         print(
-          "step \(step): loss=\(oldLoss) greedy=\(losses.last!) min=\(minLoss) max=\(losses.max()!)"
+          "step \(step): loss=\(oldLoss) greedy=\(losses.last!) "
+            + "greedy_count=\(greedyMutated.mutations.count) min=\(minLoss) max=\(losses.max()!)"
         )
         if step % saveInterval == 0 {
           let state = State(
@@ -100,12 +106,7 @@ import MNIST
   }
 
   func evaluateLoss(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Float {
-    var loss: Float = 0
-    for (inp, targ) in zip(inputs, targets) {
-      let probs = model.classify(features: inp)
-      loss -= probs[targ]
-    }
-    return loss / Float(inputs.count)
+    model.loss(data: inputs, labels: targets)
   }
 
 }

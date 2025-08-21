@@ -1,4 +1,4 @@
-public enum Mutation: Hashable, Codable {
+public enum Mutation: Hashable, Codable, Sendable {
   case addEdge(Int, Edge<Int>)
   case removeEdge(Int, Edge<Int>)
 }
