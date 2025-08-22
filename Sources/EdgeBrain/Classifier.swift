@@ -186,7 +186,8 @@ public struct Classifier: Codable, Sendable {
     zip(inputIDs, features).map { $0.1 ? $0.0.on : $0.0.off }
   }
 
-  private func logProbs(outCounts: [Int: Int]) -> [Float] {
+  /// Map program outputs to log probabilities.
+  public func logProbs(outCounts: [Int: Int]) -> [Float] {
     let outLogits = outputIDs.map { Float(outCounts[$0]!) }
     let logitMax = outLogits.max()!
     let unscaledProbs = outLogits.map { exp($0 - logitMax) }

@@ -55,6 +55,12 @@ import MNIST
 
       while true {
         let (batchInputs, batchTargets) = select(count: batchSize, fromImages: dataset.train)
+
+        let (testIns, testLabels) = select(count: dataset.test.count, fromImages: dataset.test)
+        let testAcc = accuracy(model: model, inputs: testIns, targets: testLabels)
+        let acc = accuracy(model: model, inputs: batchInputs, targets: batchTargets)
+        let oldLoss = evaluateLoss(model: model, inputs: batchInputs, targets: batchTargets)
+
         var mutatedPrograms = (0..<mutationCount).map { _ in
           var newModel = model
           for _ in 0..<mutationSize {
@@ -69,6 +75,7 @@ import MNIST
           return newModel
         }
 
+        // Include greedy model with no mutations.
         let greedyMutated = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
         mutatedPrograms.append(greedyMutated.classifier)
 
@@ -76,16 +83,17 @@ import MNIST
           evaluateLoss(model: $0, inputs: batchInputs, targets: batchTargets)
         }
         let minLoss = losses.min()!
-        let oldLoss = evaluateLoss(model: model, inputs: batchInputs, targets: batchTargets)
         if minLoss < oldLoss {
           let minIdx = losses.firstIndex(of: minLoss)!
           model = mutatedPrograms[minIdx]
         }
+
         step += 1
         print(
-          "step \(step): loss=\(oldLoss) greedy=\(losses.last!) "
+          "step \(step): loss=\(oldLoss) acc=\(acc) test_acc=\(testAcc) greedy=\(losses.last!) "
             + "greedy_count=\(greedyMutated.mutations.count) min=\(minLoss) max=\(losses.max()!)"
         )
+
         if step % saveInterval == 0 {
           let state = State(
             model: model,
@@ -107,6 +115,22 @@ import MNIST
 
   func evaluateLoss(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Float {
     model.loss(data: inputs, labels: targets)
+  }
+
+  func accuracy(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Double {
+    let allOutCounts = model.run(data: inputs).map { $0.outputs }
+    var accSum = 0.0
+    for (outCounts, target) in zip(allOutCounts, targets) {
+      let logProbs = model.logProbs(outCounts: outCounts)
+      let maxLogProb = logProbs.max()!
+
+      if logProbs[target] == maxLogProb {
+        // Deal with ties.
+        let maxCount = logProbs.count { $0 == maxLogProb }
+        accSum += 1 / Double(maxCount)
+      }
+    }
+    return accSum / Double(inputs.count)
   }
 
 }
