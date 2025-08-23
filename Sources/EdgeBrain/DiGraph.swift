@@ -17,7 +17,7 @@ extension Edge: Sendable where V: Sendable {
 /// A directed graph with constant-time insertion of edges and vertices.
 public struct DiGraph<V: Hashable> {
 
-  private var vertices: Set<V>
+  public var vertices: Set<V>
   private var outgoing: [V: Set<V>] = [:]
   private var incoming: [V: Set<V>] = [:]
 

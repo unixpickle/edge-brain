@@ -27,10 +27,17 @@ let package = Package(
         .enableExperimentalFeature("Testing")
       ]
     ),
+    .target(
+      name: "DrawGraph",
+      dependencies: [
+        "EdgeBrain"
+      ]
+    ),
     .executableTarget(
       name: "ClassifyMNIST",
       dependencies: [
         "EdgeBrain",
+        "DrawGraph",
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "MNIST", package: "honeycrisp-examples"),
       ]

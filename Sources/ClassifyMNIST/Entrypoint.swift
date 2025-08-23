@@ -1,4 +1,5 @@
 import ArgumentParser
+import DrawGraph
 import EdgeBrain
 import Foundation
 import MNIST
@@ -27,6 +28,8 @@ import MNIST
   // Saving
   @Option(name: .shortAndLong, help: "Path to save train state.") var modelPath: String =
     "state.plist"
+  @Option(name: .shortAndLong, help: "Path to save animation to.") var animationPath: String =
+    "classifier_animation"
   @Option(name: .long, help: "Save interval.") var saveInterval: Int = 10
 
   mutating func run() async {
@@ -55,6 +58,14 @@ import MNIST
 
       while true {
         let (batchInputs, batchTargets) = select(count: batchSize, fromImages: dataset.train)
+
+        try renderAnimation(
+          classifier: model,
+          features: batchInputs[0],
+          vertexRadius: 5.0,
+          drawEdges: false,
+          outputDir: URL(filePath: animationPath)
+        )
 
         let (testIns, testLabels) = select(count: dataset.test.count, fromImages: dataset.test)
         let testAcc = accuracy(model: model, inputs: testIns, targets: testLabels)
