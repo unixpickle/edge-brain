@@ -63,7 +63,9 @@ extension Classifier {
   /// mutations applied.
   public mutating func randomlyInitialize(data: [[Bool]], reachableFrac: Double) -> Int {
     let (newProgram, mutationCount) = program.randomlyInitialized(
-      data: data.map(inputNodes), reachableFrac: reachableFrac)
+      data: data.map(featuresToInputIDs),
+      reachableFrac: reachableFrac
+    )
     program = newProgram
     return mutationCount
   }

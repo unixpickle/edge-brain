@@ -118,10 +118,10 @@ import MNIST
   }
 
   func accuracy(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Double {
-    let allOutCounts = model.run(data: inputs).map { $0.outputs }
+    let allPreds = model.run(data: inputs).map { $0.prediction }
     var accSum = 0.0
-    for (outCounts, target) in zip(allOutCounts, targets) {
-      let logProbs = model.logProbs(outCounts: outCounts)
+    for (pred, target) in zip(allPreds, targets) {
+      let logProbs = pred.logProbs
       let maxLogProb = logProbs.max()!
 
       if logProbs[target] == maxLogProb {
