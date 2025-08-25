@@ -63,7 +63,8 @@ import MNIST
           classifier: model,
           features: batchInputs[0],
           vertexRadius: 5.0,
-          drawEdges: false,
+          drawEdges: true,
+          drawInputs: false,
           outputDir: URL(filePath: animationPath)
         )
 

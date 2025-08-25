@@ -80,6 +80,14 @@ public struct DiGraph<V: Hashable> {
     vertices.remove(vertex)
   }
 
+  public func removing<C: Collection<V>>(vertices: C) -> DiGraph<V> {
+    var result = self
+    for v in vertices {
+      result.remove(vertex: v)
+    }
+    return result
+  }
+
   public func contains(vertex: V) -> Bool {
     vertices.contains(vertex)
   }
