@@ -13,9 +13,11 @@ public struct Classifier: Codable, Sendable {
   public var program: Program
   public var inputIDs: [InputID] = []
   public var outputIDs: [Int] = []
+  public var edgeWeight: Float = 1.0
 
-  public init(inputCount: Int, labelCount: Int, hiddenCount: Int) {
+  public init(inputCount: Int, labelCount: Int, hiddenCount: Int, edgeWeight: Float = 1.0) {
     program = Program()
+    self.edgeWeight = edgeWeight
     for _ in 0..<inputCount {
       self.inputIDs.append(
         InputID(
@@ -87,7 +89,7 @@ public struct Classifier: Codable, Sendable {
           newCounts[idToLabel[edge.to]!] -= 1
         }
       }
-      return (Prediction(counts: newCounts), out.reachable)
+      return (Prediction(counts: newCounts, edgeWeight: edgeWeight), out.reachable)
     }
 
     func evaluateOutputs(_ out: [Output]) -> Float {
@@ -132,31 +134,53 @@ public struct Classifier: Codable, Sendable {
   private func greedyHiddenMutations(outputs: [Output], labels: [Int]) -> [(
     Mutation, Float
   )] {
+    let idCount = program.nodes.keys.max()! + 1
+    let mapCount = outputIDs.count * idCount
+
+    @Sendable
+    func mapIdx(label: Int, hidden: Int) -> Int {
+      label * idCount + hidden
+    }
+
+    var hasEdgesMut = [Bool](repeating: false, count: mapCount)
+    for node in program.nodes.values {
+      if node.kind != .hidden {
+        continue
+      }
+      for (label, id) in outputIDs.enumerated() {
+        if node.edges.contains(Edge(from: node.id, to: id)) {
+          hasEdgesMut[mapIdx(label: label, hidden: node.id)] = true
+        }
+      }
+    }
+    let hasEdges = hasEdgesMut
+
     let workerCount = min(outputs.count, ProcessInfo.processInfo.activeProcessorCount)
-    let agg = SyncArray<[Mutation: Float]>(repeating: [:], count: workerCount)
+    let agg = SyncArray<[Float]>(
+      repeating: [],
+      count: workerCount
+    )
     DispatchQueue.global().sync {
       DispatchQueue.concurrentPerform(iterations: workerCount) { workerIdx in
-        var accumulator = [Mutation: Float]()
+        var accumulator = [Float](repeating: 0, count: mapCount)
         for i in stride(from: workerIdx, to: outputs.count, by: workerCount) {
           let (pred, reachable) = outputs[i]
           let label = labels[i]
           let oldLoss = -pred.logProb(label: label)
-          for hidden in reachable {
-            let hiddenNode = program.nodes[hidden]!
-            if hiddenNode.kind != .hidden {
-              continue
-            }
-            for (outputLabel, outputID) in outputIDs.enumerated() {
-              var change: Float = 0
-              let edge = Edge(from: hidden, to: outputID)
-              let hasEdge = hiddenNode.edges.contains(edge)
-
-              let mutation: Mutation = hasEdge ? .removeEdge(hidden, edge) : .addEdge(hidden, edge)
-              let delta = hasEdge ? -1 : 1
-
-              let newLoss = -pred.logProb(label: label, withChange: delta, toLabel: outputLabel)
-              change = oldLoss - newLoss
-              accumulator[mutation, default: 0] += change
+          for (outputLabel, _) in outputIDs.enumerated() {
+            let addChange =
+              oldLoss + pred.logProb(label: label, withChange: 1, toLabel: outputLabel)
+            let removeChange =
+              oldLoss + pred.logProb(label: label, withChange: -1, toLabel: outputLabel)
+            for hidden in reachable {
+              let hiddenNode = program.nodes[hidden]!
+              if hiddenNode.kind != .hidden {
+                continue
+              }
+              let idx = mapIdx(label: outputLabel, hidden: hidden)
+              let hasEdge = hasEdges[idx]
+              let change = hasEdge ? removeChange : addChange
+              accumulator[idx] += change
             }
           }
         }
@@ -164,13 +188,28 @@ public struct Classifier: Codable, Sendable {
       }
     }
 
-    var results = [Mutation: Float]()
+    var results = [Float](repeating: 0, count: mapCount)
     for x in agg.value {
-      for (k, v) in x {
-        results[k, default: 0] += v
+      for (i, v) in x.enumerated() {
+        results[i] += v
       }
     }
-    return results.map { $0 }
+    var mutations = [(Mutation, Float)]()
+    for node in program.nodes.values {
+      if node.kind != .hidden {
+        continue
+      }
+      for (label, id) in outputIDs.enumerated() {
+        let idx = mapIdx(label: label, hidden: node.id)
+        let hasEdge = hasEdges[idx]
+        let mut: Mutation =
+          hasEdge
+          ? .removeEdge(node.id, Edge(from: node.id, to: id))
+          : .addEdge(node.id, Edge(from: node.id, to: id))
+        mutations.append((mut, results[idx]))
+      }
+    }
+    return mutations
   }
 
   /// Convert a feature vector to a collection of active input node Ds.
@@ -181,7 +220,7 @@ public struct Classifier: Codable, Sendable {
 
   /// Map program outputs to a model prediction.
   public func countsToPrediction(outCounts: [Int: Int]) -> Prediction {
-    Prediction(counts: outputIDs.map { outCounts[$0]! })
+    Prediction(counts: outputIDs.map { outCounts[$0]! }, edgeWeight: edgeWeight)
   }
 
   /// A classification prediction, as described by counts for each label.
@@ -190,6 +229,7 @@ public struct Classifier: Codable, Sendable {
   /// label i.
   public struct Prediction: Codable, Sendable {
     public let counts: [Int]
+    public let edgeWeight: Float
 
     public var logProbs: [Float] {
       let maxValue = counts.max()!
@@ -201,15 +241,16 @@ public struct Classifier: Codable, Sendable {
       return counts.map { Float($0 - maxValue) - normalizer }
     }
 
-    public init(counts: [Int]) {
+    public init(counts: [Int], edgeWeight: Float) {
       self.counts = counts
+      self.edgeWeight = edgeWeight
     }
 
     public func logProb(label: Int) -> Float {
       let maxValue = counts.max()!
       var logitSum = Float(0)
       for x in counts {
-        logitSum += exp(Float(x - maxValue))
+        logitSum += exp(Float(x - maxValue) * edgeWeight)
       }
       let normalizer = log(logitSum)
       return Float(counts[label] - maxValue) - normalizer
@@ -222,7 +263,7 @@ public struct Classifier: Codable, Sendable {
         if i == toLabel {
           x += withChange
         }
-        logitSum += exp(Float(x - almostMaxValue))
+        logitSum += exp(Float(x - almostMaxValue) * edgeWeight)
       }
       let normalizer = log(logitSum)
       let count = label == toLabel ? counts[label] + withChange : counts[label]

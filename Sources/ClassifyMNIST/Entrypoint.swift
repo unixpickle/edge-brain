@@ -13,6 +13,7 @@ import MNIST
 
   // Model config
   @Option(name: .long, help: "Number of hidden nodes.") var hiddenCount: Int = 1024
+  @Option(name: .long, help: "Softmax weight of each output edge.") var edgeWeight: Float = 1.0
 
   // Initialization
   @Option(name: .long, help: "Examples for initial batch.") var initBatchSize: Int = 100
@@ -39,7 +40,12 @@ import MNIST
       print("loading dataset...")
       let dataset = try await MNISTDataset.download(toDir: "mnist_data")
 
-      var model = Classifier(inputCount: 28 * 28, labelCount: 10, hiddenCount: hiddenCount)
+      var model = Classifier(
+        inputCount: 28 * 28,
+        labelCount: 10,
+        hiddenCount: hiddenCount,
+        edgeWeight: edgeWeight
+      )
       var step = 0
 
       if FileManager.default.fileExists(atPath: modelPath) {
