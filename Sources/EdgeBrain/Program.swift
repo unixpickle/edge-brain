@@ -17,7 +17,15 @@ public struct Program: Codable, Sendable {
   public var nodes: [Int: Node] = [:]
   private var idCounter: Int = 0
 
+  var maximumID: Int {
+    idCounter - 1
+  }
+
   public init() {
+  }
+
+  func hiddenIDs() -> [Int] {
+    nodes.values.compactMap { $0.kind == .hidden ? $0.id : nil }.sorted()
   }
 
   @discardableResult

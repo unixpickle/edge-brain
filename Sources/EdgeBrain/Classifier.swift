@@ -5,6 +5,9 @@ public struct Classifier: Codable, Sendable {
 
   public typealias Output = (prediction: Prediction, reachable: Set<Int>)
 
+  internal typealias ReachableBitmap = [Bool]
+  internal typealias BitmapOutput = (prediction: Prediction, reachable: ReachableBitmap)
+
   public struct InputID: Codable, Sendable {
     public var off: Int
     public var on: Int
@@ -69,39 +72,73 @@ public struct Classifier: Codable, Sendable {
     }
   }
 
+  /// Like run() but return reachable bitmaps.
+  internal func runBitmap(data: [[Bool]], program: Program? = nil) -> [BitmapOutput] {
+    let idCount = (program ?? self.program).maximumID + 1
+    return run(data: data, program: program).map { (prediction, reachableSet) in
+      var reachableArr = Array(repeating: false, count: idCount)
+      for x in reachableSet {
+        reachableArr[x] = true
+      }
+      return (prediction, reachableArr)
+    }
+  }
+
   /// Compute a sequence of greedily-selected mutations to minimize loss on the
   /// provided data.
   public mutating func greedilyMutatedForData(data: [[Bool]], labels: [Int])
     -> (classifier: Classifier, mutations: [Mutation])
   {
-    let idToLabel = Dictionary(
-      uniqueKeysWithValues: outputIDs.enumerated().map { ($0.element, $0.offset) }
-    )
-    func mutateOutput(_ out: Output, _ mutation: Mutation) -> Output {
-      var newCounts = out.prediction.counts
+    let idToLabel = Dictionary(uniqueKeysWithValues: zip(outputIDs, outputIDs.indices))
+
+    /// Mutate the outputs, though note that this will not preserve the
+    /// order of the outputs.
+    func mutate(outputs: [BitmapOutput], mutation: Mutation) -> [BitmapOutput] {
+      let delta: Int
+      let hiddenNode: Int
+      let label: Int
       switch mutation {
-      case .addEdge(let hiddenNode, let edge):
-        if out.reachable.contains(hiddenNode) {
-          newCounts[idToLabel[edge.to]!] += 1
-        }
-      case .removeEdge(let hiddenNode, let edge):
-        if out.reachable.contains(hiddenNode) {
-          newCounts[idToLabel[edge.to]!] -= 1
-        }
+      case .addEdge(let h, let edge):
+        hiddenNode = h
+        delta = 1
+        label = idToLabel[edge.to]!
+      case .removeEdge(let h, let edge):
+        hiddenNode = h
+        delta = -1
+        label = idToLabel[edge.to]!
       }
-      return (Prediction(counts: newCounts, edgeWeight: edgeWeight), out.reachable)
+
+      return outputs.map { (prediction, reachable) in
+        var newCounts = prediction.counts
+        if reachable[hiddenNode] {
+          newCounts[label] += delta
+        }
+        return (Prediction(counts: newCounts, edgeWeight: edgeWeight), reachable)
+      }
     }
 
-    func evaluateOutputs(_ out: [Output]) -> Float {
-      var result: Float = 0
-      for ((counts, _), label) in zip(out, labels) {
-        result -= counts.logProb(label: label)
+    func evaluate(outputs: [BitmapOutput]) -> Float {
+      let workerCount = min(outputs.count, ProcessInfo.processInfo.activeProcessorCount)
+      let agg = SyncArray<Float>(
+        repeating: 0,
+        count: workerCount
+      )
+      DispatchQueue.global().sync {
+        DispatchQueue.concurrentPerform(iterations: workerCount) { workerIdx in
+          var result: Float = 0
+          for i in stride(from: workerIdx, to: outputs.count, by: workerCount) {
+            let pred = outputs[i].0
+            let label = labels[i]
+            result -= pred.logProb(label: label)
+          }
+          agg.set(result, at: workerIdx)
+        }
       }
-      return result
+      return agg.value.reduce(0, +)
     }
 
-    var curOutputs = run(data: data)
-    var curLoss = evaluateOutputs(curOutputs)
+    var curOutputs = runBitmap(data: data)
+    var curLoss = evaluate(outputs: curOutputs)
     var result = self
     var appliedMutations: [Mutation] = []
     let sortedMutations = greedyHiddenMutations(outputs: curOutputs, labels: labels).sorted {
@@ -114,8 +151,8 @@ public struct Classifier: Codable, Sendable {
         // by skipping all remaining (even worse) mutations.
         break
       }
-      let newOutputs = curOutputs.map { mutateOutput($0, mutation) }
-      let newLoss = evaluateOutputs(newOutputs)
+      let newOutputs = mutate(outputs: curOutputs, mutation: mutation)
+      let newLoss = evaluate(outputs: newOutputs)
       if newLoss < curLoss {
         curOutputs = newOutputs
         curLoss = newLoss
@@ -131,11 +168,12 @@ public struct Classifier: Codable, Sendable {
   ///
   /// The improvement is positive when the loss would decrease, i.e. the
   /// log-prob would increase by adding this edge.
-  private func greedyHiddenMutations(outputs: [Output], labels: [Int]) -> [(
+  private func greedyHiddenMutations(outputs: [BitmapOutput], labels: [Int]) -> [(
     Mutation, Float
   )] {
-    let idCount = program.nodes.keys.max()! + 1
+    let idCount = program.maximumID + 1
     let mapCount = outputIDs.count * idCount
+    let hiddenIDs = program.hiddenIDs()
 
     @Sendable
     func mapIdx(label: Int, hidden: Int) -> Int {
@@ -172,12 +210,11 @@ public struct Classifier: Codable, Sendable {
               oldLoss + pred.logProb(label: label, withChange: 1, toLabel: outputLabel)
             let removeChange =
               oldLoss + pred.logProb(label: label, withChange: -1, toLabel: outputLabel)
-            for hidden in reachable {
-              let hiddenNode = program.nodes[hidden]!
-              if hiddenNode.kind != .hidden {
+            for hiddenID in hiddenIDs {
+              if !reachable[hiddenID] {
                 continue
               }
-              let idx = mapIdx(label: outputLabel, hidden: hidden)
+              let idx = mapIdx(label: outputLabel, hidden: hiddenID)
               let hasEdge = hasEdges[idx]
               let change = hasEdge ? removeChange : addChange
               accumulator[idx] += change
@@ -195,17 +232,14 @@ public struct Classifier: Codable, Sendable {
       }
     }
     var mutations = [(Mutation, Float)]()
-    for node in program.nodes.values {
-      if node.kind != .hidden {
-        continue
-      }
+    for hiddenID in hiddenIDs {
       for (label, id) in outputIDs.enumerated() {
-        let idx = mapIdx(label: label, hidden: node.id)
+        let idx = mapIdx(label: label, hidden: hiddenID)
         let hasEdge = hasEdges[idx]
         let mut: Mutation =
           hasEdge
-          ? .removeEdge(node.id, Edge(from: node.id, to: id))
-          : .addEdge(node.id, Edge(from: node.id, to: id))
+          ? .removeEdge(hiddenID, Edge(from: hiddenID, to: id))
+          : .addEdge(hiddenID, Edge(from: hiddenID, to: id))
         mutations.append((mut, results[idx]))
       }
     }
