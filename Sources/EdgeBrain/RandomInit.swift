@@ -4,17 +4,33 @@ extension Program {
   /// reachable hidden nodes.
   ///
   /// Also returns the number of applied edge insertions.
-  public func randomlyInitialized<C: Collection<Int>>(data: [C], reachableFrac: Double) -> (
+  public func randomlyInitialized<C: Collection<Int>>(
+    data: [C],
+    reachableFrac: Double,
+    hiddenGroups: Int = 1
+  ) -> (
     Program, Int
   ) {
     var allMutations: [Mutation] = []
+
+    let hiddenIDs = hiddenIDs()
+    let hiddenToGroup = Dictionary(
+      uniqueKeysWithValues: zip(hiddenIDs, hiddenIDs.indices.map { $0 % hiddenGroups })
+    )
+
+    func mutationFilter(_: Int, edge: Edge<Int>) -> Bool {
+      if let g1 = hiddenToGroup[edge.from], let g2 = hiddenToGroup[edge.to], g1 != g2 {
+        return false
+      }
+      return true
+    }
 
     // Fill up end until it has too much coverage
     var end = self
     while end.reachableHiddenFraction(data: data) < reachableFrac {
       let addCount = max(1, allMutations.count)
       for _ in 0..<addCount {
-        guard let (v, e) = end.randomAddition(destKind: [.hidden]) else {
+        guard let (v, e) = end.randomAddition(destKind: [.hidden], filter: mutationFilter) else {
           break
         }
         let m = Mutation.addEdge(v, e)
@@ -61,10 +77,15 @@ extension Program {
 extension Classifier {
   /// Apply the program's randomlyInitialized() method and return the number of
   /// mutations applied.
-  public mutating func randomlyInitialize(data: [[Bool]], reachableFrac: Double) -> Int {
+  public mutating func randomlyInitialize(
+    data: [[Bool]],
+    reachableFrac: Double,
+    hiddenGroups: Int = 1
+  ) -> Int {
     let (newProgram, mutationCount) = program.randomlyInitialized(
       data: data.map(featuresToInputIDs),
-      reachableFrac: reachableFrac
+      reachableFrac: reachableFrac,
+      hiddenGroups: hiddenGroups
     )
     program = newProgram
     return mutationCount

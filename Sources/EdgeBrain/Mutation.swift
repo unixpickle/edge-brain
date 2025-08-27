@@ -9,7 +9,8 @@ extension Program {
   public func randomAddition(
     nodeKind: Set<Node.Kind> = [.input, .hidden],
     sourceKind: Set<Node.Kind> = [.input, .hidden],
-    destKind: Set<Node.Kind> = [.hidden, .output]
+    destKind: Set<Node.Kind> = [.hidden, .output],
+    filter: ((Int, Edge<Int>) -> Bool)? = nil
   ) -> (Int, Edge<Int>)? {
     let sources = nodes.values.compactMap { sourceKind.contains($0.kind) ? $0.id : nil }.shuffled()
     let dests = nodes.values.compactMap { destKind.contains($0.kind) ? $0.id : nil }.shuffled()
@@ -30,6 +31,9 @@ extension Program {
             continue
           }
           let edge = Edge(from: someSource, to: someDest)
+          if let f = filter, !f(v.id, edge) {
+            continue
+          }
           if !v.edges.contains(edge) {
             return (v.id, edge)
           }

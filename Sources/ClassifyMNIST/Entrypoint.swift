@@ -19,6 +19,7 @@ import MNIST
   @Option(name: .long, help: "Examples for initial batch.") var initBatchSize: Int = 100
   @Option(name: .long, help: "Initial hidden reachability fraction.") var initReachableFrac:
     Double = 0.2
+  @Option(name: .long, help: "Initial hidden reachability fraction.") var initHiddenGroups: Int = 1
 
   // Training config
   @Option(name: .long, help: "Batch size per step.") var batchSize: Int = 20
@@ -58,7 +59,11 @@ import MNIST
       } else {
         print("initializing model...")
         let (imgs, _) = select(count: initBatchSize, fromImages: dataset.train)
-        let mutationCount = model.randomlyInitialize(data: imgs, reachableFrac: initReachableFrac)
+        let mutationCount = model.randomlyInitialize(
+          data: imgs,
+          reachableFrac: initReachableFrac,
+          hiddenGroups: initHiddenGroups
+        )
         print(" => initialized with \(mutationCount) insertions")
       }
 
