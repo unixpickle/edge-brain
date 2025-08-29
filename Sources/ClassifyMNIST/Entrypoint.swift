@@ -80,9 +80,8 @@ import MNIST
         )
 
         let (testIns, testLabels) = select(count: dataset.test.count, fromImages: dataset.test)
-        let testAcc = accuracy(model: model, inputs: testIns, targets: testLabels)
-        let acc = accuracy(model: model, inputs: batchInputs, targets: batchTargets)
-        let oldLoss = evaluateLoss(model: model, inputs: batchInputs, targets: batchTargets)
+        let (testAcc, testLoss) = evaluate(model: model, inputs: testIns, targets: testLabels)
+        let (acc, oldLoss) = evaluate(model: model, inputs: batchInputs, targets: batchTargets)
 
         var mutatedPrograms = (0..<mutationCount).map { _ in
           var newModel = model
@@ -90,31 +89,30 @@ import MNIST
             newModel.program.mutate(
               newModel.program.randomMutation(deleteProb: mutationDeleteProb))
           }
-          newModel =
-            newModel.greedilyMutatedForData(
-              data: batchInputs,
-              labels: batchTargets
-            ).classifier
-          return newModel
+          return newModel.greedilyMutatedForData(
+            data: batchInputs,
+            labels: batchTargets
+          )
         }
 
         // Include greedy model with no mutations.
         let greedyMutated = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
-        mutatedPrograms.append(greedyMutated.classifier)
+        mutatedPrograms.append(greedyMutated)
 
         let losses = mutatedPrograms.map {
-          evaluateLoss(model: $0, inputs: batchInputs, targets: batchTargets)
+          $0.loss
         }
         let minLoss = losses.min()!
-        if minLoss < oldLoss {
+        if minLoss < Float(oldLoss) {
           let minIdx = losses.firstIndex(of: minLoss)!
-          model = mutatedPrograms[minIdx]
+          model = mutatedPrograms[minIdx].classifier
         }
 
         step += 1
         print(
-          "step \(step): loss=\(oldLoss) acc=\(acc) test_acc=\(testAcc) greedy=\(losses.last!) "
-            + "greedy_count=\(greedyMutated.mutations.count) min=\(minLoss) max=\(losses.max()!)"
+          "step \(step): loss=\(oldLoss) acc=\(acc) test_loss=\(testLoss) test_acc=\(testAcc) "
+            + "greedy=\(losses.last!) greedy_count=\(greedyMutated.mutations.count) "
+            + "min=\(minLoss) max=\(losses.max()!)"
         )
 
         if step % saveInterval == 0 {
@@ -129,20 +127,29 @@ import MNIST
     } catch { print("FATAL ERROR: \(error)") }
   }
 
-  func select(count: Int, fromImages: [MNISTDataset.Image]) -> ([[Bool]], [Int]) {
-    let inputsAndLabels = fromImages.randomSample(count: count).map { img in
-      (img.pixels.map { UInt8.random(in: 0...0xff) < $0 }, img.label)
+  func select(count: Int, fromImages: [MNISTDataset.Image]) -> ([Bitmap], [Int]) {
+    func sampleImage(_ img: MNISTDataset.Image) -> (Bitmap, Int) {
+      (Bitmap(img.pixels.map { UInt8.random(in: 0..<0xff) < $0 }), img.label)
     }
-    return (inputsAndLabels.map { $0.0 }, inputsAndLabels.map { $0.1 })
+
+    var sampledImages = [(Bitmap, Int)]()
+    var remaining = count
+    while remaining > fromImages.count {
+      sampledImages.append(contentsOf: fromImages.map(sampleImage))
+      remaining -= fromImages.count
+    }
+    sampledImages.append(contentsOf: fromImages.randomSample(count: remaining).map(sampleImage))
+    return (sampledImages.map { $0.0 }, sampledImages.map { $0.1 })
   }
 
-  func evaluateLoss(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Float {
-    model.loss(data: inputs, labels: targets)
-  }
-
-  func accuracy(model: Classifier, inputs: [[Bool]], targets: [Int]) -> Double {
-    let allPreds = model.run(data: inputs).map { $0.prediction }
+  func evaluate(
+    model: Classifier,
+    inputs: [Bitmap],
+    targets: [Int]
+  ) -> (acc: Double, loss: Double) {
+    let allPreds = model.predictions(data: inputs)
     var accSum = 0.0
+    var lossSum = 0.0
     for (pred, target) in zip(allPreds, targets) {
       let logProbs = pred.logProbs
       let maxLogProb = logProbs.max()!
@@ -152,8 +159,10 @@ import MNIST
         let maxCount = logProbs.count { $0 == maxLogProb }
         accSum += 1 / Double(maxCount)
       }
+
+      lossSum -= Double(logProbs[target])
     }
-    return accSum / Double(inputs.count)
+    return (accSum / Double(inputs.count), lossSum / Double(inputs.count))
   }
 
 }

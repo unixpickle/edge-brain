@@ -12,7 +12,7 @@ public struct Node: Codable, Sendable {
 
 public struct Program: Codable, Sendable {
 
-  public typealias Output = (outputs: [Int: Int], reachable: Set<Int>)
+  public typealias Output = (outputs: [Int: Int], reachable: Bitmap)
 
   public var nodes: [Int: Node] = [:]
   private var idCounter: Int = 0
@@ -99,6 +99,12 @@ public struct Program: Codable, Sendable {
       active = reachable
     }
 
+    let idCount = maximumID + 1
+    var reachableArr = Bitmap(count: idCount)
+    for x in active {
+      reachableArr[x] = true
+    }
+
     return (
       outputs: Dictionary(
         uniqueKeysWithValues: nodes.compactMap { kv -> (Int, Int)? in
@@ -108,7 +114,7 @@ public struct Program: Codable, Sendable {
           return (kv.key, g.neighbors(to: kv.key).intersection(active).count)
         }
       ),
-      reachable: active
+      reachable: reachableArr
     )
   }
 

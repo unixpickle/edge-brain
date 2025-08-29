@@ -3,7 +3,7 @@ import Foundation
 
 public func renderAnimation(
   classifier: Classifier,
-  features: [Bool],
+  features: Bitmap,
   vertexRadius: CGFloat,
   drawEdges: Bool = true,
   drawInputs: Bool = true,

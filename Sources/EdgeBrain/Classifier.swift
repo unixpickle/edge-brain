@@ -3,10 +3,7 @@ import Foundation
 /// A wrapper around a program that tracks input variables and output classes.
 public struct Classifier: Codable, Sendable {
 
-  public typealias Output = (prediction: Prediction, reachable: Set<Int>)
-
-  internal typealias ReachableBitmap = [Bool]
-  internal typealias BitmapOutput = (prediction: Prediction, reachable: ReachableBitmap)
+  public typealias Output = (prediction: Prediction, reachable: Bitmap)
 
   public struct InputID: Codable, Sendable {
     public var off: Int
@@ -38,7 +35,7 @@ public struct Classifier: Codable, Sendable {
   }
 
   /// Compute class log probabilities for an input feature map.
-  public func classify(features: [Bool]) -> Prediction {
+  public func classify(features: Bitmap) -> Prediction {
     countsToPrediction(
       outCounts: program.run(
         withInputs: featuresToInputIDs(features: features)
@@ -47,53 +44,58 @@ public struct Classifier: Codable, Sendable {
   }
 
   /// Compute the loss on all of the data examples.
-  public func loss(data: [[Bool]], labels: [Int], program: Program? = nil) -> Float {
-    zip(run(data: data), labels).map {
-      -$0.0.prediction.logProb(label: $0.1)
+  public func loss(data: [Bitmap], labels: [Int], program: Program? = nil) -> Float {
+    zip(predictions(data: data), labels).map { (pred, label) in
+      -pred.logProb(label: label)
     }.reduce(0, +) / Float(data.count)
   }
 
-  /// Compute the output maps and hidden sets for all of the data examples.
-  public func run(data: [[Bool]], program: Program? = nil) -> [Output] {
+  /// Compute predictions for the data.
+  public func predictions(data: [Bitmap], program: Program? = nil) -> [Prediction] {
     let program = program ?? self.program
     let count = data.count
-    let agg = SyncArray<Program.Output?>(repeating: nil, count: count)
+    let agg = SyncArray<Prediction?>(repeating: nil, count: count)
 
     let featuresToInputIDs = self.featuresToInputIDs
     DispatchQueue.global().sync(execute: {
       DispatchQueue.concurrentPerform(iterations: count) { i in
         let features = data[i]
-        agg.set(program.run(withInputs: featuresToInputIDs(features)), at: i)
+        let (pred, _) = program.run(withInputs: featuresToInputIDs(features))
+        agg.set(countsToPrediction(outCounts: pred), at: i)
       }
     })
 
-    return agg.value.map { out in
-      (countsToPrediction(outCounts: out!.outputs), out!.reachable)
-    }
+    return agg.value.map { $0! }
   }
 
-  /// Like run() but return reachable bitmaps.
-  internal func runBitmap(data: [[Bool]], program: Program? = nil) -> [BitmapOutput] {
-    let idCount = (program ?? self.program).maximumID + 1
-    return run(data: data, program: program).map { (prediction, reachableSet) in
-      var reachableArr = Array(repeating: false, count: idCount)
-      for x in reachableSet {
-        reachableArr[x] = true
+  /// Compute predictions and reachable bitmaps for the data.
+  internal func run(data: [Bitmap], program: Program? = nil) -> [Output] {
+    let program = program ?? self.program
+    let count = data.count
+    let agg = SyncArray<Output?>(repeating: nil, count: count)
+
+    let featuresToInputIDs = self.featuresToInputIDs
+    DispatchQueue.global().sync(execute: {
+      DispatchQueue.concurrentPerform(iterations: count) { i in
+        let features = data[i]
+        let (pred, reachable) = program.run(withInputs: featuresToInputIDs(features))
+        agg.set((countsToPrediction(outCounts: pred), reachable), at: i)
       }
-      return (prediction, reachableArr)
-    }
+    })
+
+    return agg.value.map { $0! }
   }
 
   /// Compute a sequence of greedily-selected mutations to minimize loss on the
   /// provided data.
-  public mutating func greedilyMutatedForData(data: [[Bool]], labels: [Int])
-    -> (classifier: Classifier, mutations: [Mutation])
+  public mutating func greedilyMutatedForData(data: [Bitmap], labels: [Int])
+    -> (classifier: Classifier, mutations: [Mutation], loss: Float)
   {
     let idToLabel = Dictionary(uniqueKeysWithValues: zip(outputIDs, outputIDs.indices))
 
     /// Mutate the outputs, though note that this will not preserve the
     /// order of the outputs.
-    func mutate(outputs: [BitmapOutput], mutation: Mutation) -> [BitmapOutput] {
+    func mutate(outputs: [Output], mutation: Mutation) -> [Output] {
       let delta: Int
       let hiddenNode: Int
       let label: Int
@@ -117,7 +119,7 @@ public struct Classifier: Codable, Sendable {
       }
     }
 
-    func evaluate(outputs: [BitmapOutput]) -> Float {
+    func evaluate(outputs: [Output]) -> Float {
       let workerCount = min(outputs.count, ProcessInfo.processInfo.activeProcessorCount)
       let agg = SyncArray<Float>(
         repeating: 0,
@@ -137,7 +139,7 @@ public struct Classifier: Codable, Sendable {
       return agg.value.reduce(0, +)
     }
 
-    var curOutputs = runBitmap(data: data)
+    var curOutputs = run(data: data)
     var curLoss = evaluate(outputs: curOutputs)
     var result = self
     var appliedMutations: [Mutation] = []
@@ -160,7 +162,7 @@ public struct Classifier: Codable, Sendable {
         appliedMutations.append(mutation)
       }
     }
-    return (classifier: result, mutations: appliedMutations)
+    return (classifier: result, mutations: appliedMutations, loss: curLoss / Float(data.count))
   }
 
   /// Compute, for each edge between a hidden node and an output, the loss
@@ -168,9 +170,7 @@ public struct Classifier: Codable, Sendable {
   ///
   /// The improvement is positive when the loss would decrease, i.e. the
   /// log-prob would increase by adding this edge.
-  private func greedyHiddenMutations(outputs: [BitmapOutput], labels: [Int]) -> [(
-    Mutation, Float
-  )] {
+  private func greedyHiddenMutations(outputs: [Output], labels: [Int]) -> [(Mutation, Float)] {
     let idCount = program.maximumID + 1
     let mapCount = outputIDs.count * idCount
     let hiddenIDs = program.hiddenIDs()
@@ -180,7 +180,7 @@ public struct Classifier: Codable, Sendable {
       label * idCount + hidden
     }
 
-    var hasEdgesMut = [Bool](repeating: false, count: mapCount)
+    var hasEdgesMut = Bitmap(count: mapCount)
     for node in program.nodes.values {
       if node.kind != .hidden {
         continue
@@ -247,7 +247,7 @@ public struct Classifier: Codable, Sendable {
   }
 
   /// Convert a feature vector to a collection of active input node Ds.
-  public func featuresToInputIDs(features: [Bool]) -> [Int] {
+  public func featuresToInputIDs(features: Bitmap) -> [Int] {
     precondition(features.count == inputIDs.count)
     return zip(inputIDs, features).map { $0.1 ? $0.0.on : $0.0.off }
   }

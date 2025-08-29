@@ -64,8 +64,11 @@ extension Program {
   /// dataset.
   public func reachableHiddenFraction<C: Collection<Int>>(data: [C]) -> Double {
     var total = 0.0
+    let hiddenIDs = Set(nodes.values.compactMap { $0.kind == .hidden ? $0.id : nil })
     for x in data {
-      let hCount = run(withInputs: x).reachable.count { nodes[$0]!.kind == .hidden }
+      let hCount = run(withInputs: x).reachable.enumerated().count { (id, present) in
+        present && hiddenIDs.contains(id)
+      }
       total += Double(hCount)
     }
     let hiddenCount = nodes.values.count { $0.kind == .hidden }
@@ -78,7 +81,7 @@ extension Classifier {
   /// Apply the program's randomlyInitialized() method and return the number of
   /// mutations applied.
   public mutating func randomlyInitialize(
-    data: [[Bool]],
+    data: [Bitmap],
     reachableFrac: Double,
     hiddenGroups: Int = 1
   ) -> Int {

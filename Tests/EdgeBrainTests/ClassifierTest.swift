@@ -3,7 +3,7 @@ import Testing
 
 @Test
 func testClassifierPredictionLogits() {
-  let pred = Classifier.Prediction(counts: [0, 3, 2])
+  let pred = Classifier.Prediction(counts: [0, 3, 2], edgeWeight: 1.0)
   let actual = pred.logProbs
   let expected: [Float] = [-3.3490, -0.3490, -1.3490]
   for (a, x) in zip(actual, expected) {
