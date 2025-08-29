@@ -1,5 +1,5 @@
 /// An efficient representation of an array of bits.
-public struct Bitmap: Sendable, RandomAccessCollection, MutableCollection {
+public struct Bitmap: Sendable, RandomAccessCollection, MutableCollection, Hashable {
   public let count: Int
   private var values: [UInt64]
 

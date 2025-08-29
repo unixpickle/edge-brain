@@ -22,10 +22,14 @@ import MNIST
   @Option(name: .long, help: "Initial hidden reachability fraction.") var initHiddenGroups: Int = 1
 
   // Training config
-  @Option(name: .long, help: "Batch size per step.") var batchSize: Int = 20
-  @Option(name: .long, help: "Number of mutations to try.") var mutationCount: Int = 20
+  @Option(name: .long, help: "Batch size per step.") var batchSize: Int = 10000
+  @Option(name: .long, help: "Number of mutations to try.") var mutationCount: Int = 5
   @Option(name: .long, help: "Changes per mutation.") var mutationSize: Int = 3
-  @Option(name: .long, help: "Changes per mutation.") var mutationDeleteProb: Double = 0.25
+  @Option(name: .long, help: "Edge deletion probability.") var mutationDeleteProb: Double = 0.25
+  @Option(name: .long, help: "Mutations to test at smaller batch size.")
+  var preliminaryMutationCount: Int = 5
+  @Option(name: .long, help: "Batch size for testing more mutations.")
+  var preliminaryMutationBatchSize: Int = 100
 
   // Saving
   @Option(name: .shortAndLong, help: "Path to save train state.") var modelPath: String =
@@ -83,16 +87,22 @@ import MNIST
         let (testAcc, testLoss) = evaluate(model: model, inputs: testIns, targets: testLabels)
         let (acc, oldLoss) = evaluate(model: model, inputs: batchInputs, targets: batchTargets)
 
-        var mutatedPrograms = (0..<mutationCount).map { _ in
+        let preliminaryMutations = (0..<preliminaryMutationCount).map { _ in
           var newModel = model
           for _ in 0..<mutationSize {
             newModel.program.mutate(
-              newModel.program.randomMutation(deleteProb: mutationDeleteProb))
+              newModel.program.randomMutation(deleteProb: mutationDeleteProb)
+            )
           }
           return newModel.greedilyMutatedForData(
-            data: batchInputs,
-            labels: batchTargets
+            data: Array(batchInputs[..<preliminaryMutationBatchSize]),
+            labels: Array(batchTargets[..<preliminaryMutationBatchSize])
           )
+        }
+
+        let keptMutations = preliminaryMutations.sorted(by: { $0.loss < $1.loss })[..<mutationCount]
+        var mutatedPrograms = keptMutations.map { mutation in
+          mutation.classifier.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
         }
 
         // Include greedy model with no mutations.
@@ -111,7 +121,7 @@ import MNIST
         step += 1
         print(
           "step \(step): loss=\(oldLoss) acc=\(acc) test_loss=\(testLoss) test_acc=\(testAcc) "
-            + "greedy=\(losses.last!) greedy_count=\(greedyMutated.mutations.count) "
+            + "greedy=\(greedyMutated.loss) greedy_count=\(greedyMutated.mutations.count) "
             + "min=\(minLoss) max=\(losses.max()!)"
         )
 

@@ -17,7 +17,7 @@ public struct Program: Codable, Sendable {
   public var nodes: [Int: Node] = [:]
   private var idCounter: Int = 0
 
-  var maximumID: Int {
+  public var maximumID: Int {
     idCounter - 1
   }
 
@@ -79,24 +79,30 @@ public struct Program: Codable, Sendable {
   /// Also returns the entire reachable set.
   public func run<C: Collection<Int>>(withInputs: C) -> Output {
     var active = Set(withInputs)
+    var insertQueue = active.flatMap { nodes[$0]!.edges }
     var g = DiGraph(vertices: nodes.keys)
-    for r in active {
-      for edge in nodes[r]!.edges {
-        g.insert(edge: edge)
-      }
-    }
 
-    while true {
-      let reachable = g.reachable(from: active)
-      if reachable.count == active.count {
-        break
+    while let insertEdge = insertQueue.popLast() {
+      let fromActive = active.contains(insertEdge.from)
+      let toActive = active.contains(insertEdge.to)
+      let toOutput = nodes[insertEdge.to]!.kind == .output
+      if toOutput || (!fromActive && !toActive) {
+        g.insert(edge: insertEdge)
       }
-      for added in reachable.subtracting(active) {
-        for edge in nodes[added]!.edges {
-          g.insert(edge: edge)
+      if fromActive && !toActive {
+        var queue = [insertEdge.to]
+        active.insert(insertEdge.to)
+        while let newActive = queue.popLast() {
+          for edge in nodes[newActive]!.edges {
+            insertQueue.append(edge)
+          }
+          for n in g.neighbors(from: newActive) {
+            if active.insert(n).inserted {
+              queue.append(n)
+            }
+          }
         }
       }
-      active = reachable
     }
 
     let idCount = maximumID + 1
@@ -107,11 +113,11 @@ public struct Program: Codable, Sendable {
 
     return (
       outputs: Dictionary(
-        uniqueKeysWithValues: nodes.compactMap { kv -> (Int, Int)? in
-          if kv.value.kind != .output {
+        uniqueKeysWithValues: nodes.compactMap { (k, v) -> (Int, Int)? in
+          if v.kind != .output {
             return nil
           }
-          return (kv.key, g.neighbors(to: kv.key).intersection(active).count)
+          return (k, g.neighbors(to: k).intersection(active).count)
         }
       ),
       reachable: reachableArr

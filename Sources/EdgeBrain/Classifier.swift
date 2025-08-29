@@ -88,7 +88,7 @@ public struct Classifier: Codable, Sendable {
 
   /// Compute a sequence of greedily-selected mutations to minimize loss on the
   /// provided data.
-  public mutating func greedilyMutatedForData(data: [Bitmap], labels: [Int])
+  public func greedilyMutatedForData(data: [Bitmap], labels: [Int])
     -> (classifier: Classifier, mutations: [Mutation], loss: Float)
   {
     let idToLabel = Dictionary(uniqueKeysWithValues: zip(outputIDs, outputIDs.indices))
