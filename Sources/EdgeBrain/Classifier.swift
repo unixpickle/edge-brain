@@ -86,11 +86,37 @@ public struct Classifier: Codable, Sendable {
     return agg.value.map { $0! }
   }
 
+  public enum MutationSelectionRule {
+    /// Select any mutation which improves (lowers) the mean
+    case mean
+
+    /// Select any mutation which has greater than probability p
+    /// likelihood of reducing the mean
+    case confidence(Double)
+
+    internal func shouldMutate(
+      old: (mean: Double, variance: Double), new: (mean: Double, variance: Double)
+    ) -> Bool {
+      switch self {
+      case .mean:
+        return old.mean > new.mean
+      case .confidence(let p):
+        let deltaMean = old.mean - new.mean
+        let combinedVariance = old.variance + new.variance
+        let z = deltaMean / sqrt(combinedVariance)
+        let pNewLtOld = 0.5 * (1.0 + erf(z / 2.squareRoot()))
+        return pNewLtOld > p
+      }
+    }
+  }
+
   /// Compute a sequence of greedily-selected mutations to minimize loss on the
   /// provided data.
-  public func greedilyMutatedForData(data: [Bitmap], labels: [Int])
-    -> (classifier: Classifier, mutations: [Mutation], loss: Float)
-  {
+  public func greedilyMutatedForData(
+    data: [Bitmap],
+    labels: [Int],
+    selectionRule: MutationSelectionRule = .mean
+  ) -> (classifier: Classifier, mutations: [Mutation], loss: Double) {
     let idToLabel = Dictionary(uniqueKeysWithValues: zip(outputIDs, outputIDs.indices))
 
     /// Mutate the outputs, though note that this will not preserve the
@@ -119,28 +145,38 @@ public struct Classifier: Codable, Sendable {
       }
     }
 
-    func evaluate(outputs: [Output]) -> Float {
+    func evaluate(outputs: [Output]) -> (mean: Double, variance: Double) {
       let workerCount = min(outputs.count, ProcessInfo.processInfo.activeProcessorCount)
-      let agg = SyncArray<Float>(
+      let aggMean = SyncArray<Double>(
+        repeating: 0,
+        count: workerCount
+      )
+      let aggSqMean = SyncArray<Double>(
         repeating: 0,
         count: workerCount
       )
       DispatchQueue.global().sync {
         DispatchQueue.concurrentPerform(iterations: workerCount) { workerIdx in
-          var result: Float = 0
+          var sum: Double = 0
+          var sqSum: Double = 0
           for i in stride(from: workerIdx, to: outputs.count, by: workerCount) {
             let pred = outputs[i].0
             let label = labels[i]
-            result -= pred.logProb(label: label)
+            let lp = Double(-pred.logProb(label: label))
+            sum += lp
+            sqSum += lp * lp
           }
-          agg.set(result, at: workerIdx)
+          aggMean.set(sum, at: workerIdx)
+          aggSqMean.set(sqSum, at: workerIdx)
         }
       }
-      return agg.value.reduce(0, +)
+      let mean = aggMean.value.reduce(0, +) / Double(outputs.count)
+      let sqMean = aggSqMean.value.reduce(0, +) / Double(outputs.count)
+      return (mean: mean, variance: max(0, sqMean - mean * mean) / Double(outputs.count))
     }
 
     var curOutputs = run(data: data)
-    var curLoss = evaluate(outputs: curOutputs)
+    var curEvaluation = evaluate(outputs: curOutputs)
     var result = self
     var appliedMutations: [Mutation] = []
     let sortedMutations = greedyHiddenMutations(outputs: curOutputs, labels: labels).sorted {
@@ -154,15 +190,15 @@ public struct Classifier: Codable, Sendable {
         break
       }
       let newOutputs = mutate(outputs: curOutputs, mutation: mutation)
-      let newLoss = evaluate(outputs: newOutputs)
-      if newLoss < curLoss {
+      let newEvaluation = evaluate(outputs: newOutputs)
+      if selectionRule.shouldMutate(old: curEvaluation, new: newEvaluation) {
         curOutputs = newOutputs
-        curLoss = newLoss
+        curEvaluation = newEvaluation
         result.program.mutate(mutation)
         appliedMutations.append(mutation)
       }
     }
-    return (classifier: result, mutations: appliedMutations, loss: curLoss / Float(data.count))
+    return (classifier: result, mutations: appliedMutations, loss: curEvaluation.mean)
   }
 
   /// Compute, for each edge between a hidden node and an output, the loss

@@ -30,6 +30,8 @@ import MNIST
   var preliminaryMutationCount: Int = 5
   @Option(name: .long, help: "Batch size for testing more mutations.")
   var preliminaryMutationBatchSize: Int = 100
+  @Option(name: .long, help: "Mutation selection confidence bound")
+  var mutationSelectionConfidence: Double? = nil
 
   // Saving
   @Option(name: .shortAndLong, help: "Path to save train state.") var modelPath: String =
@@ -40,6 +42,13 @@ import MNIST
 
   mutating func run() async {
     print("Command:", CommandLine.arguments.joined(separator: " "))
+
+    let selectionRule: Classifier.MutationSelectionRule =
+      if let p = mutationSelectionConfidence {
+        .confidence(p)
+      } else {
+        .mean
+      }
 
     do {
       print("loading dataset...")
@@ -96,24 +105,33 @@ import MNIST
           }
           return newModel.greedilyMutatedForData(
             data: Array(batchInputs[..<preliminaryMutationBatchSize]),
-            labels: Array(batchTargets[..<preliminaryMutationBatchSize])
+            labels: Array(batchTargets[..<preliminaryMutationBatchSize]),
+            selectionRule: selectionRule
           )
         }
 
         let keptMutations = preliminaryMutations.sorted(by: { $0.loss < $1.loss })[..<mutationCount]
         var mutatedPrograms = keptMutations.map { mutation in
-          mutation.classifier.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
+          mutation.classifier.greedilyMutatedForData(
+            data: batchInputs,
+            labels: batchTargets,
+            selectionRule: selectionRule
+          )
         }
 
         // Include greedy model with no mutations.
-        let greedyMutated = model.greedilyMutatedForData(data: batchInputs, labels: batchTargets)
+        let greedyMutated = model.greedilyMutatedForData(
+          data: batchInputs,
+          labels: batchTargets,
+          selectionRule: selectionRule
+        )
         mutatedPrograms.append(greedyMutated)
 
         let losses = mutatedPrograms.map {
           $0.loss
         }
         let minLoss = losses.min()!
-        if minLoss < Float(oldLoss) {
+        if minLoss < oldLoss {
           let minIdx = losses.firstIndex(of: minLoss)!
           model = mutatedPrograms[minIdx].classifier
         }
