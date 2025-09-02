@@ -24,7 +24,7 @@ public struct Program: Codable, Sendable {
   public init() {
   }
 
-  func hiddenIDs() -> [Int] {
+  public func hiddenIDs() -> [Int] {
     nodes.values.compactMap { $0.kind == .hidden ? $0.id : nil }.sorted()
   }
 

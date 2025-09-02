@@ -12,11 +12,14 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
     .package(url: "https://github.com/unixpickle/honeycrisp-examples.git", from: "0.0.4"),
+    .package(url: "https://github.com/unixpickle/honeycrisp.git", from: "0.0.33"),
   ],
   targets: [
     .target(
       name: "EdgeBrain",
-      dependencies: []
+      dependencies: [
+        .product(name: "Honeycrisp", package: "honeycrisp")
+      ]
     ),
     .testTarget(
       name: "EdgeBrainTests",

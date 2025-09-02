@@ -2,6 +2,7 @@ import ArgumentParser
 import DrawGraph
 import EdgeBrain
 import Foundation
+import Honeycrisp
 import MNIST
 
 @main struct Main: AsyncParsableCommand {
@@ -33,6 +34,9 @@ import MNIST
   @Option(name: .long, help: "Mutation selection confidence bound")
   var mutationSelectionConfidence: Double? = nil
 
+  @Flag(name: .long, help: "Evaluate the model with a linear classifier")
+  var evaluateLinearLoss: Bool = false
+
   // Saving
   @Option(name: .shortAndLong, help: "Path to save train state.") var modelPath: String =
     "state.plist"
@@ -51,6 +55,8 @@ import MNIST
       }
 
     do {
+      Backend.defaultBackend = try MPSBackend()
+
       print("loading dataset...")
       let dataset = try await MNISTDataset.download(toDir: "mnist_data")
 
@@ -77,7 +83,10 @@ import MNIST
           reachableFrac: initReachableFrac,
           hiddenGroups: initHiddenGroups
         )
-        print(" => initialized with \(mutationCount) insertions")
+        let equiv = model.equivalentHiddenNodes(data: imgs)
+        print(
+          " => initialized with \(mutationCount) insertions with \(equiv.count) unique hidden nodes"
+        )
       }
 
       while true {
@@ -93,8 +102,28 @@ import MNIST
         )
 
         let (testIns, testLabels) = select(count: dataset.test.count, fromImages: dataset.test)
-        let (testAcc, testLoss) = evaluate(model: model, inputs: testIns, targets: testLabels)
-        let (acc, oldLoss) = evaluate(model: model, inputs: batchInputs, targets: batchTargets)
+        let (testAcc, testLoss) = try await evaluate(
+          model: model, inputs: testIns, targets: testLabels)
+        let (acc, oldLoss) = try await evaluate(
+          model: model, inputs: batchInputs, targets: batchTargets)
+
+        var linearLoss: Float? = nil
+        if evaluateLinearLoss {
+          let linearClf = LinearClassifier(
+            featureCount: model.program.hiddenIDs().count,
+            outputCount: model.outputIDs.count
+          )
+          try await linearClf.fit(
+            program: model.program,
+            data: model.run(data: batchInputs).map { $0.reachable },
+            labels: batchTargets
+          )
+          linearLoss = try await linearClf.loss(
+            program: model.program,
+            data: model.run(data: testIns).map { $0.reachable },
+            labels: testLabels
+          )
+        }
 
         let preliminaryMutations = (0..<preliminaryMutationCount).map { _ in
           var newModel = model
@@ -137,11 +166,14 @@ import MNIST
         }
 
         step += 1
-        print(
+        var logStr =
           "step \(step): loss=\(oldLoss) acc=\(acc) test_loss=\(testLoss) test_acc=\(testAcc) "
-            + "greedy=\(greedyMutated.loss) greedy_count=\(greedyMutated.mutations.count) "
-            + "min=\(minLoss) max=\(losses.max()!)"
-        )
+          + "greedy=\(greedyMutated.loss) greedy_count=\(greedyMutated.mutations.count) "
+          + "min=\(minLoss) max=\(losses.max()!)"
+        if let linearLoss = linearLoss {
+          logStr += " linear_loss=\(linearLoss)"
+        }
+        print(logStr)
 
         if step % saveInterval == 0 {
           let state = State(
@@ -174,7 +206,7 @@ import MNIST
     model: Classifier,
     inputs: [Bitmap],
     targets: [Int]
-  ) -> (acc: Double, loss: Double) {
+  ) async throws -> (acc: Double, loss: Double) {
     let allPreds = model.predictions(data: inputs)
     var accSum = 0.0
     var lossSum = 0.0

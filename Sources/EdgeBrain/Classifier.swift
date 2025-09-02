@@ -69,7 +69,7 @@ public struct Classifier: Codable, Sendable {
   }
 
   /// Compute predictions and reachable bitmaps for the data.
-  internal func run(data: [Bitmap], program: Program? = nil) -> [Output] {
+  public func run(data: [Bitmap], program: Program? = nil) -> [Output] {
     let program = program ?? self.program
     let count = data.count
     let agg = SyncArray<Output?>(repeating: nil, count: count)
