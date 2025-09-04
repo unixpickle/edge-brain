@@ -108,6 +108,7 @@ import MNIST
           model: model, inputs: batchInputs, targets: batchTargets)
 
         var linearLoss: Float? = nil
+        var linearAcc: Float? = nil
         if evaluateLinearLoss {
           let linearClf = LinearClassifier(
             featureCount: model.program.hiddenIDs().count,
@@ -118,7 +119,7 @@ import MNIST
             data: model.run(data: batchInputs).map { $0.reachable },
             labels: batchTargets
           )
-          linearLoss = try await linearClf.loss(
+          (linearLoss, linearAcc) = try await linearClf.evaluate(
             program: model.program,
             data: model.run(data: testIns).map { $0.reachable },
             labels: testLabels
@@ -170,8 +171,8 @@ import MNIST
           "step \(step): loss=\(oldLoss) acc=\(acc) test_loss=\(testLoss) test_acc=\(testAcc) "
           + "greedy=\(greedyMutated.loss) greedy_count=\(greedyMutated.mutations.count) "
           + "min=\(minLoss) max=\(losses.max()!)"
-        if let linearLoss = linearLoss {
-          logStr += " linear_loss=\(linearLoss)"
+        if let linearLoss = linearLoss, let linearAcc = linearAcc {
+          logStr += " linear_loss=\(linearLoss) linear_acc=\(linearAcc)"
         }
         print(logStr)
 

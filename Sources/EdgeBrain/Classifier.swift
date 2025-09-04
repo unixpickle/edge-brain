@@ -206,7 +206,7 @@ public struct Classifier: Codable, Sendable {
   ///
   /// The improvement is positive when the loss would decrease, i.e. the
   /// log-prob would increase by adding this edge.
-  private func greedyHiddenMutations(outputs: [Output], labels: [Int]) -> [(Mutation, Float)] {
+  private func greedyHiddenMutations(outputs: [Output], labels: [Int]) -> [(Mutation, Double)] {
     let idCount = program.maximumID + 1
     let mapCount = outputIDs.count * idCount
     let hiddenIDs = program.hiddenIDs()
@@ -230,13 +230,13 @@ public struct Classifier: Codable, Sendable {
     let hasEdges = hasEdgesMut
 
     let workerCount = min(outputs.count, ProcessInfo.processInfo.activeProcessorCount)
-    let agg = SyncArray<[Float]>(
+    let agg = SyncArray<[Double]>(
       repeating: [],
       count: workerCount
     )
     DispatchQueue.global().sync {
       DispatchQueue.concurrentPerform(iterations: workerCount) { workerIdx in
-        var accumulator = [Float](repeating: 0, count: mapCount)
+        var accumulator = [Double](repeating: 0, count: mapCount)
         for i in stride(from: workerIdx, to: outputs.count, by: workerCount) {
           let (pred, reachable) = outputs[i]
           let label = labels[i]
@@ -253,7 +253,7 @@ public struct Classifier: Codable, Sendable {
               let idx = mapIdx(label: outputLabel, hidden: hiddenID)
               let hasEdge = hasEdges[idx]
               let change = hasEdge ? removeChange : addChange
-              accumulator[idx] += change
+              accumulator[idx] += Double(change)
             }
           }
         }
@@ -261,13 +261,13 @@ public struct Classifier: Codable, Sendable {
       }
     }
 
-    var results = [Float](repeating: 0, count: mapCount)
+    var results = [Double](repeating: 0, count: mapCount)
     for x in agg.value {
       for (i, v) in x.enumerated() {
         results[i] += v
       }
     }
-    var mutations = [(Mutation, Float)]()
+    var mutations = [(Mutation, Double)]()
     for hiddenID in hiddenIDs {
       for (label, id) in outputIDs.enumerated() {
         let idx = mapIdx(label: label, hidden: hiddenID)
@@ -305,10 +305,10 @@ public struct Classifier: Codable, Sendable {
       let maxValue = counts.max()!
       var logitSum = Float(0)
       for x in counts {
-        logitSum += exp(Float(x - maxValue))
+        logitSum += exp(Float(x - maxValue) * edgeWeight)
       }
       let normalizer = log(logitSum)
-      return counts.map { Float($0 - maxValue) - normalizer }
+      return counts.map { Float($0 - maxValue) * edgeWeight - normalizer }
     }
 
     public init(counts: [Int], edgeWeight: Float) {
@@ -323,7 +323,7 @@ public struct Classifier: Codable, Sendable {
         logitSum += exp(Float(x - maxValue) * edgeWeight)
       }
       let normalizer = log(logitSum)
-      return Float(counts[label] - maxValue) - normalizer
+      return Float(counts[label] - maxValue) * edgeWeight - normalizer
     }
 
     public func logProb(label: Int, withChange: Int, toLabel: Int) -> Float {
@@ -337,7 +337,7 @@ public struct Classifier: Codable, Sendable {
       }
       let normalizer = log(logitSum)
       let count = label == toLabel ? counts[label] + withChange : counts[label]
-      return Float(count - almostMaxValue) - normalizer
+      return Float(count - almostMaxValue) * edgeWeight - normalizer
     }
   }
 
